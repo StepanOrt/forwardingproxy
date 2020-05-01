@@ -58,6 +58,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
 		return
 	}
+	r.RemoteAddr = ""
 	p.ForwardingHTTPProxy.ServeHTTP(w, r)
 }
 
@@ -146,6 +147,7 @@ func parseBasicProxyAuth(authz string) (username, password string, ok bool) {
 // See: https://golang.org/pkg/net/http/httputil/#ReverseProxy
 func NewForwardingHTTPProxy(logger *log.Logger) *httputil.ReverseProxy {
 	director := func(req *http.Request) {
+		req.Header.Del("Proxy-Connection")
 		if _, ok := req.Header["User-Agent"]; !ok {
 			// explicitly disable User-Agent so it's not set to default value
 			req.Header.Set("User-Agent", "")
