@@ -1,17 +1,28 @@
 # Copyright (C) 2018 Betalo AB - All Rights Reserved
 
-FROM golang:1.10
+FROM golang:1.14 as builder
 
 LABEL maintainer="Betalo Backend Team <backend-team@betalo.se>"
 
-RUN mkdir -p /go/src/github.com/betalo-sweden/forwardingproxy
-WORKDIR /go/src/github.com/betalo-sweden/forwardingproxy
+RUN mkdir /build
+WORKDIR /build
+ADD . .
+ENV CGO_ENABLED=0
+RUN go build
 
-COPY ./vendor vendor
-COPY *.go ./
+FROM alpine
 
-RUN go install
+
+RUN mkdir /app
+WORKDIR /app
+COPY --from=builder /build/forwardingproxy .
+RUN chown -R 1001:0 . && chmod -R 550 /app
+RUN apk add --update-cache libcap && \
+    setcap 'cap_net_bind_service=+ep' ./forwardingproxy && \
+    apk del libcap && \
+    rm -rf /var/cache/apk/*
+USER 1001
 
 EXPOSE 80 443
 
-ENTRYPOINT ["forwardingproxy"]
+ENTRYPOINT ["/app/forwardingproxy"]
