@@ -49,6 +49,10 @@ Usage of forwardingproxy:
     	Server authentication username
   -verbose
     	Set log level to DEBUG
+  -anonymous
+        Anonymous proxy
+  -remoteaddrwhitelist
+        Whitelist of remote addresses separated by comma
 ```
 
 To start the proxy as HTTP server, just run:

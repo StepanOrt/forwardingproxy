@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type Proxy struct {
 	DestWriteTimeout    time.Duration
 	ClientReadTimeout   time.Duration
 	ClientWriteTimeout  time.Duration
+	Anonymous           bool
+	RemoteAddrWhitelist []string
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,14 +55,54 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var ipRegexp = func() *regexp.Regexp {
+	r, _ := regexp.Compile("^((\\[(?P<IPv6>([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{1,4}))])|(?P<IPv4>(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}(\\[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])))(:[0-9]{1,5})?$")
+	return r
+}()
+
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.Logger.Debug("Got HTTP request", zap.String("host", r.Host))
 	if p.Avoid != "" && strings.Contains(r.Host, p.Avoid) == true {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
 		return
 	}
-	r.RemoteAddr = ""
+	remoteAddr := func(remoteAddr string) string {
+		submatch := ipRegexp.FindStringSubmatch(remoteAddr)
+		for i, name := range ipRegexp.SubexpNames() {
+			switch name {
+			case "IPv6":
+				if submatch[i] != "" {
+					return submatch[i]
+				}
+			case "IPv4":
+				if submatch[i] != "" {
+					return submatch[i]
+				}
+			}
+		}
+		return r.RemoteAddr
+	}(r.RemoteAddr)
+	if !p.passRemoteAddrWhitelist(remoteAddr) {
+		p.Logger.Error("not whitelisted", zap.String("remoteAddr", remoteAddr))
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	if p.Anonymous {
+		r.RemoteAddr = ""
+	}
 	p.ForwardingHTTPProxy.ServeHTTP(w, r)
+}
+
+func (p *Proxy) passRemoteAddrWhitelist(r string) bool {
+	if p.RemoteAddrWhitelist != nil {
+		for _, ip := range p.RemoteAddrWhitelist {
+			if ip == r {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
@@ -106,10 +149,10 @@ func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	p.Logger.Debug("Hijacked connection", zap.String("host", r.Host))
 
 	now := time.Now()
-	clientConn.SetReadDeadline(now.Add(p.ClientReadTimeout))
-	clientConn.SetWriteDeadline(now.Add(p.ClientWriteTimeout))
-	destConn.SetReadDeadline(now.Add(p.DestReadTimeout))
-	destConn.SetWriteDeadline(now.Add(p.DestWriteTimeout))
+	_ = clientConn.SetReadDeadline(now.Add(p.ClientReadTimeout))
+	_ = clientConn.SetWriteDeadline(now.Add(p.ClientWriteTimeout))
+	_ = destConn.SetReadDeadline(now.Add(p.DestReadTimeout))
+	_ = destConn.SetWriteDeadline(now.Add(p.DestWriteTimeout))
 
 	go transfer(destConn, clientConn)
 	go transfer(clientConn, destConn)

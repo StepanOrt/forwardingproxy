@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -40,6 +41,9 @@ func main() {
 		flagLetsEncrypt = flag.Bool("letsencrypt", false, "Use letsencrypt for https")
 		flagLEWhitelist = flag.String("lewhitelist", "", "Hostname to whitelist for letsencrypt")
 		flagLECacheDir  = flag.String("lecachedir", "/tmp", "Cache directory for certificates")
+
+		flagRemoteAddrWhitelist = flag.String("remoteaddrwhitelist", "", "Whitelist of remote addresses separated by comma")
+		flagAnonymous           = flag.Bool("anonymous", false, "Anonymous proxy")
 	)
 
 	flag.Parse()
@@ -57,7 +61,7 @@ func main() {
 	if err != nil {
 		log.Fatalln("Error: failed to initiate logger")
 	}
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 	stdLogger := zap.NewStdLog(logger)
 
 	p := &Proxy{
@@ -71,6 +75,13 @@ func main() {
 		ClientReadTimeout:   *flagClientReadTimeout,
 		ClientWriteTimeout:  *flagClientWriteTimeout,
 		Avoid:               *flagAvoid,
+		RemoteAddrWhitelist: func(s string) []string {
+			if s == "" {
+				return nil
+			}
+			return strings.Split(s, ",")
+		}(*flagRemoteAddrWhitelist),
+		Anonymous: *flagAnonymous,
 	}
 
 	s := &http.Server{
