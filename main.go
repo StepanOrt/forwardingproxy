@@ -92,14 +92,20 @@ func main() {
 			p.Logger.Info("-lecachedir should be set, using '/tmp' for now...")
 		}
 
-		m := &autocert.Manager{
+		certManager := &autocert.Manager{
 			Cache:      autocert.DirCache(*flagLECacheDir),
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(*flagLEWhitelist),
 		}
 
 		s.Addr = ":https"
-		s.TLSConfig = m.TLSConfig()
+		s.TLSConfig = &tls.Config{
+			GetCertificate: certManager.GetCertificate,
+		}
+		go func() {
+			h := certManager.HTTPHandler(nil)
+			log.Fatal(http.ListenAndServe(":http", h))
+		}()
 	}
 
 	idleConnsClosed := make(chan struct{})
@@ -131,4 +137,3 @@ func main() {
 	<-idleConnsClosed
 	p.Logger.Info("Server stopped")
 }
-
