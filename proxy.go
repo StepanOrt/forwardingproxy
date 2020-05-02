@@ -48,35 +48,23 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if r.URL.Scheme == "http" {
-		p.handleHTTP(w, r)
-	} else {
-		p.handleTunneling(w, r)
-	}
-}
-
-var ipRegexp = func() *regexp.Regexp {
-	r, _ := regexp.Compile("^((\\[(?P<IPv6>([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{1,4}))])|(?P<IPv4>(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}(\\[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])))(:[0-9]{1,5})?$")
-	return r
-}()
-
-func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	p.Logger.Debug("Got HTTP request", zap.String("host", r.Host))
 	if p.Avoid != "" && strings.Contains(r.Host, p.Avoid) == true {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
 		return
 	}
 	remoteAddr := func(remoteAddr string) string {
 		submatch := ipRegexp.FindStringSubmatch(remoteAddr)
-		for i, name := range ipRegexp.SubexpNames() {
-			switch name {
-			case "IPv6":
-				if submatch[i] != "" {
-					return submatch[i]
-				}
-			case "IPv4":
-				if submatch[i] != "" {
-					return submatch[i]
+		if submatch != nil {
+			for i, name := range ipRegexp.SubexpNames() {
+				switch name {
+				case "IPv6":
+					if submatch[i] != "" {
+						return submatch[i]
+					}
+				case "IPv4":
+					if submatch[i] != "" {
+						return submatch[i]
+					}
 				}
 			}
 		}
@@ -90,6 +78,21 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.Anonymous {
 		r.RemoteAddr = ""
 	}
+
+	if r.URL.Scheme == "http" {
+		p.handleHTTP(w, r)
+	} else {
+		p.handleTunneling(w, r)
+	}
+}
+
+var ipRegexp = func() *regexp.Regexp {
+	r, _ := regexp.Compile("^((\\[(?P<IPv6>([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{1,4}))])|(?P<IPv4>([0-9]{1,3}\\.){3}[0-9]{0,2}[0-9]{1,3}))(:[0-9]{1,5})?$")
+	return r
+}()
+
+func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	p.Logger.Debug("Got HTTP request", zap.String("host", r.Host))
 	p.ForwardingHTTPProxy.ServeHTTP(w, r)
 }
 
@@ -106,11 +109,6 @@ func (p *Proxy) passRemoteAddrWhitelist(r string) bool {
 }
 
 func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
-
-	if p.Avoid != "" && strings.Contains(r.Host, p.Avoid) == true {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
-		return
-	}
 
 	if r.Method != http.MethodConnect {
 		p.Logger.Info("Method not allowed", zap.String("method", r.Method))
