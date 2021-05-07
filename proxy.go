@@ -34,24 +34,12 @@ type Proxy struct {
 	ClientWriteTimeout  time.Duration
 	Anonymous           bool
 	RemoteAddrWhitelist []string
+	PreWhiteList        bool
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.Logger.Info("Incoming request", zap.String("host", r.Host))
 
-	if p.AuthUser != "" && p.AuthPass != "" {
-		user, pass, ok := parseBasicProxyAuth(r.Header.Get("Proxy-Authorization"))
-		if !ok || user != p.AuthUser || pass != p.AuthPass {
-			p.Logger.Warn("Authorization attempt with invalid credentials")
-			http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
-			return
-		}
-	}
-
-	if p.Avoid != "" && strings.Contains(r.Host, p.Avoid) == true {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
-		return
-	}
 	remoteAddr := func(remoteAddr string) string {
 		submatch := ipRegexp.FindStringSubmatch(remoteAddr)
 		if submatch != nil {
@@ -70,11 +58,37 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return r.RemoteAddr
 	}(r.RemoteAddr)
+
+	if p.PreWhiteList && p.passRemoteAddrWhitelist(remoteAddr) {
+		p.Logger.Debug("pre-whitelisted")
+	} else if p.AuthUser != "" && p.AuthPass != "" {
+		p.Logger.Debug("auth required")
+		user, pass, ok := parseBasicProxyAuth(r.Header.Get("Proxy-Authorization"))
+		if !ok || user != p.AuthUser || pass != p.AuthPass {
+			p.Logger.Warn("Authorization attempt with invalid credentials")
+			http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
+			return
+		}
+		p.Logger.Debug("auth successful")
+		if p.PreWhiteList {
+			p.RemoteAddrWhitelist = append(p.RemoteAddrWhitelist, remoteAddr)
+			p.Logger.Info("remote address whitelisted", zap.String("remoteAddr", remoteAddr))
+		}
+	}
+
+	if p.Avoid != "" && strings.Contains(r.Host, p.Avoid) == true {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusMethodNotAllowed)
+		return
+	}
+
 	if !p.passRemoteAddrWhitelist(remoteAddr) {
 		p.Logger.Error("not whitelisted", zap.String("remoteAddr", remoteAddr))
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
+	} else {
+		p.Logger.Debug("whitelisted", zap.String("remoteAddr", remoteAddr))
 	}
+
 	if p.Anonymous {
 		r.RemoteAddr = ""
 	}

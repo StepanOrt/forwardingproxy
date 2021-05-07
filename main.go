@@ -44,6 +44,8 @@ func main() {
 
 		flagRemoteAddrWhitelist = flag.String("remoteaddrwhitelist", "", "Whitelist of remote addresses separated by comma")
 		flagAnonymous           = flag.Bool("anonymous", false, "Anonymous proxy")
+
+		flagPreWhitelist = flag.Bool("prewhitelist", false, "Authenticated request whitelists remote address")
 	)
 
 	flag.Parse()
@@ -76,12 +78,18 @@ func main() {
 		ClientWriteTimeout:  *flagClientWriteTimeout,
 		Avoid:               *flagAvoid,
 		RemoteAddrWhitelist: func(s string) []string {
+			if *flagPreWhitelist && s == "" {
+				return make([]string, 0)
+			}
 			if s == "" {
 				return nil
 			}
-			return strings.Split(s, ",")
+			split := strings.Split(s, ",")
+			logger.Debug("initial", zap.Strings("whitelist", split))
+			return split
 		}(*flagRemoteAddrWhitelist),
-		Anonymous: *flagAnonymous,
+		Anonymous:    *flagAnonymous,
+		PreWhiteList: *flagPreWhitelist,
 	}
 
 	s := &http.Server{
